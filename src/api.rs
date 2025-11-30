@@ -3,7 +3,7 @@
 
 use crate::process::{ProcessManager, ProcessFilter, SortColumn, ProcessInfo};
 use crate::history::HistoryManager;
-use actix_web::{web, App, HttpServer, HttpResponse, Responder, middleware};
+use actix_web::{web, App, HttpServer, HttpResponse, Responder, middleware, http::header};
 use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -11,6 +11,12 @@ use std::time::Duration;
 use tokio::time::interval;
 use chrono::{DateTime, Utc};
 use tracing::{debug, info, warn, error};
+use rust_embed::RustEmbed;
+
+// Embed the web UI files directly into the binary
+#[derive(RustEmbed)]
+#[folder = "web/dist/"]
+struct WebAssets;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiProcessInfo {
@@ -318,6 +324,44 @@ async fn health_check() -> impl Responder {
     }))
 }
 
+/// Serve embedded static files
+async fn serve_embedded_file(path: web::Path<String>) -> impl Responder {
+    let path = path.into_inner();
+    let file_path = if path.is_empty() { "index.html" } else { &path };
+
+    match WebAssets::get(file_path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(file_path).first_or_octet_stream();
+            HttpResponse::Ok()
+                .insert_header(header::ContentType(mime))
+                .body(content.data.into_owned())
+        }
+        None => {
+            // For SPA routing, serve index.html for unknown paths
+            match WebAssets::get("index.html") {
+                Some(content) => {
+                    HttpResponse::Ok()
+                        .insert_header(header::ContentType(mime_guess::mime::TEXT_HTML))
+                        .body(content.data.into_owned())
+                }
+                None => HttpResponse::NotFound().body("Not found"),
+            }
+        }
+    }
+}
+
+/// Serve index.html for root path
+async fn serve_index() -> impl Responder {
+    match WebAssets::get("index.html") {
+        Some(content) => {
+            HttpResponse::Ok()
+                .insert_header(header::ContentType(mime_guess::mime::TEXT_HTML))
+                .body(content.data.into_owned())
+        }
+        None => HttpResponse::NotFound().body("Web UI not available"),
+    }
+}
+
 // Background task to record historical data
 async fn record_history_task(state: Arc<AppState>) {
     let mut interval = interval(Duration::from_secs(60)); // Record every minute
@@ -366,7 +410,7 @@ pub async fn start_api_server(
     history_db_path: Option<String>,
 ) -> std::io::Result<()> {
     let pm = Arc::new(Mutex::new(process_manager));
-    
+
     let history_manager = if let Some(db_path) = history_db_path {
         match HistoryManager::new(&db_path) {
             Ok(hm) => Some(Arc::new(Mutex::new(hm))),
@@ -378,12 +422,12 @@ pub async fn start_api_server(
     } else {
         None
     };
-    
+
     let app_state = Arc::new(AppState {
         process_manager: pm,
         history_manager: history_manager.clone(),
     });
-    
+
     // Start background history recording task
     if history_manager.is_some() {
         let state_clone = app_state.clone();
@@ -391,24 +435,26 @@ pub async fn start_api_server(
             record_history_task(state_clone).await;
         });
     }
-    
+
     println!("Starting REST API server on {}", bind_address);
-    
+    println!("Web UI embedded in binary - no external files needed");
+
     let app_state_data = web::Data::new(AppState {
         process_manager: app_state.process_manager.clone(),
         history_manager: app_state.history_manager.clone(),
     });
-    
+
     HttpServer::new(move || {
         let cors = Cors::default()
             .allow_any_origin()
             .allow_any_method()
             .allow_any_header();
-        
+
         App::new()
             .app_data(app_state_data.clone())
             .wrap(middleware::Logger::default())
             .wrap(cors)
+            // API routes
             .route("/api/health", web::get().to(health_check))
             .route("/api/processes", web::get().to(get_processes))
             .route("/api/processes/{pid}", web::get().to(get_process))
@@ -416,11 +462,15 @@ pub async fn start_api_server(
             .route("/api/system", web::get().to(get_system_info))
             .route("/api/history/processes", web::get().to(get_process_history))
             .route("/api/history/top-cpu", web::get().to(get_top_cpu_consumers))
+            // Serve embedded static files
+            .route("/", web::get().to(serve_index))
+            .route("/{path:.*}", web::get().to(serve_embedded_file))
     })
     .bind(bind_address)?
     .run()
     .await
 }
+
 
 #[cfg(test)]
 mod tests {

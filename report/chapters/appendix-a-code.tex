@@ -1,0 +1,837 @@
+\chapter{Code Samples}
+\label{app:code}
+
+This appendix provides representative code samples from key modules of the Linux Process Manager, demonstrating implementation patterns, algorithms, and architectural decisions. Complete source code is available in the project repository.
+
+\section{Process Management Core}
+\label{sec:code-process}
+
+\subsection{ProcessInfo Structure and Basic Operations}
+
+\begin{lstlisting}[language=Rust, caption={ProcessInfo Structure Definition (src/process.rs)}]
+/// Complete information about a single process
+#[derive(Debug, Clone)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub ppid: u32,
+    pub name: String,
+    pub command: String,
+    pub user: String,
+    pub cpu_usage: f32,
+    pub memory_usage: u64,      // in KB
+    pub memory_percent: f32,
+    pub status: String,
+    pub start_time: u64,
+    pub running_time: Duration,
+    pub uid: u32,
+    pub gid: u32,
+    pub threads: u32,
+    pub priority: i32,
+    pub nice: i32,
+    // Enhanced features
+    pub network_connections: Option<usize>,
+    pub is_container: bool,
+    pub container_id: Option<String>,
+    pub cgroup_memory_limit: Option<u64>,
+    pub gpu_memory: Option<u64>,
+}
+
+impl ProcessInfo {
+    /// Format memory size in human-readable format
+    pub fn format_memory(&self) -> String {
+        let kb = self.memory_usage;
+        if kb < 1024 {
+            format!("{} KB", kb)
+        } else if kb < 1024 * 1024 {
+            format!("{:.1} MB", kb as f64 / 1024.0)
+        } else {
+            format!("{:.2} GB", kb as f64 / (1024.0 * 1024.0))
+        }
+    }
+
+    /// Get formatted running time as "Xd Yh Zm"
+    pub fn format_running_time(&self) -> String {
+        let total_secs = self.running_time.as_secs();
+        let days = total_secs / 86400;
+        let hours = (total_secs % 86400) / 3600;
+        let minutes = (total_secs % 3600) / 60;
+
+        if days > 0 {
+            format!("{}d {}h {}m", days, hours, minutes)
+        } else if hours > 0 {
+            format!("{}h {}m", hours, minutes)
+        } else {
+            format!("{}m", minutes)
+        }
+    }
+}
+\end{lstlisting}
+
+\subsection{Process Refresh Algorithm}
+
+\begin{lstlisting}[language=Rust, caption={Process Refresh Implementation (src/process.rs)}]
+impl ProcessManager {
+    /// Refresh process list with enhanced information
+    pub fn refresh(&mut self) -> Result<()> {
+        // Update system information
+        self.system.refresh_all();
+
+        // Clear previous process data
+        self.processes.clear();
+
+        // Enumerate all processes
+        for (pid, process) in self.system.processes() {
+            let pid_u32 = pid.as_u32();
+
+            // Extract basic process information
+            let mut info = ProcessInfo {
+                pid: pid_u32,
+                ppid: process.parent()
+                    .map(|p| p.as_u32())
+                    .unwrap_or(0),
+                name: process.name().to_string(),
+                command: process.cmd().join(" "),
+                user: self.get_username(process.uid()),
+                cpu_usage: process.cpu_usage(),
+                memory_usage: process.memory() / 1024, // bytes to KB
+                memory_percent: self.calculate_memory_percent(
+                    process.memory()
+                ),
+                status: format!("{:?}", process.status()),
+                start_time: process.start_time(),
+                running_time: Duration::from_secs(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() - process.start_time()
+                ),
+                uid: process.uid(),
+                gid: process.gid(),
+                threads: process.tasks().unwrap_or(1) as u32,
+                priority: 0, // Extracted from /proc below
+                nice: 0,
+                network_connections: None,
+                is_container: false,
+                container_id: None,
+                cgroup_memory_limit: None,
+                gpu_memory: None,
+            };
+
+            // Enhance with Linux-specific information
+            self.enhance_process_info(&mut info)?;
+
+            self.processes.insert(pid_u32, info);
+        }
+
+        self.last_update = SystemTime::now();
+        Ok(())
+    }
+
+    /// Enhance process info with Linux-specific data
+    fn enhance_process_info(&self, info: &mut ProcessInfo)
+        -> Result<()> {
+        // Read priority and nice from /proc/[pid]/stat
+        if let Ok(stat) = self.read_proc_stat(info.pid) {
+            info.priority = stat.priority;
+            info.nice = stat.nice;
+        }
+
+        // Count network connections
+        info.network_connections = self.count_network_connections(
+            info.pid
+        ).ok();
+
+        // Detect container
+        if let Ok(Some(container_id)) =
+            detect_container_for_pid(info.pid) {
+            info.is_container = true;
+            info.container_id = Some(container_id);
+        }
+
+        // Query GPU memory
+        info.gpu_memory = get_gpu_memory_for_pid(info.pid).ok()
+            .flatten();
+
+        Ok(())
+    }
+}
+\end{lstlisting}
+
+\section{Container Detection}
+\label{sec:code-containers}
+
+\subsection{Cgroup Parsing for Container Detection}
+
+\begin{lstlisting}[language=Rust, caption={Container Detection Algorithm (src/containers.rs)}]
+/// Detect if a process is running in a container
+pub fn detect_container_for_pid(pid: u32)
+    -> Result<Option<String>> {
+    let cgroup_path = format!("/proc/{}/cgroup", pid);
+
+    // Read cgroup file
+    let contents = match fs::read_to_string(&cgroup_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // Process may have exited
+            return Ok(None);
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    // Parse each cgroup line
+    for line in contents.lines() {
+        // Format: hierarchy-ID:controller-list:cgroup-path
+
+        // Docker detection: /docker/<container-id>
+        if line.contains("/docker/") {
+            if let Some(id) = extract_container_id_docker(line) {
+                debug!("Detected Docker container: {}", id);
+                return Ok(Some(id));
+            }
+        }
+
+        // Kubernetes detection: /kubepods/.../pod<pod-id>/...
+        if line.contains("/kubepods/") {
+            if let Some(id) = extract_container_id_k8s(line) {
+                debug!("Detected Kubernetes pod: {}", id);
+                return Ok(Some(id));
+            }
+        }
+
+        // Podman detection: /libpod-<container-id>
+        if line.contains("/libpod-") {
+            if let Some(id) = extract_container_id_podman(line) {
+                debug!("Detected Podman container: {}", id);
+                return Ok(Some(id));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Extract Docker container ID from cgroup path
+fn extract_container_id_docker(cgroup_line: &str) -> Option<String> {
+    // Pattern: /docker/<64-char-hex-id>
+    let re = Regex::new(r"/docker/([0-9a-f]{64})").ok()?;
+    re.captures(cgroup_line)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+/// Extract Kubernetes pod ID from cgroup path
+fn extract_container_id_k8s(cgroup_line: &str) -> Option<String> {
+    // Pattern: /kubepods/.../pod<uuid>/...
+    let re = Regex::new(
+        r"/kubepods/.*/pod([0-9a-f]{8}-[0-9a-f]{4}-\
+          [0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    ).ok()?;
+    re.captures(cgroup_line)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+/// Extract Podman container ID from cgroup path
+fn extract_container_id_podman(cgroup_line: &str) -> Option<String> {
+    // Pattern: /libpod-<64-char-hex-id>
+    let re = Regex::new(r"/libpod-([0-9a-f]{64})").ok()?;
+    re.captures(cgroup_line)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_string())
+}
+\end{lstlisting}
+
+\section{GPU Monitoring}
+\label{sec:code-gpu}
+
+\subsection{NVIDIA GPU Information Retrieval}
+
+\begin{lstlisting}[language=Rust, caption={NVIDIA GPU Monitoring (src/gpu.rs)}]
+/// Query NVIDIA GPU information using nvidia-smi
+fn get_nvidia_gpu_info() -> Result<SystemGpuInfo> {
+    let output = Command::new("nvidia-smi")
+        .args(&[
+            "--query-gpu=index,name,memory.total,memory.used,\
+             temperature.gpu,utilization.gpu,driver_version",
+            "--format=csv,noheader,nounits"
+        ])
+        .output()
+        .context("Failed to execute nvidia-smi")?;
+
+    if !output.status.success() {
+        return Err(anyhow!("nvidia-smi command failed"));
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+    let mut gpus = Vec::new();
+
+    for line in output_str.lines() {
+        let parts: Vec<&str> = line.split(',')
+            .map(|s| s.trim())
+            .collect();
+
+        if parts.len() >= 7 {
+            let gpu = GpuDevice {
+                index: parts[0].parse()
+                    .context("Invalid GPU index")?,
+                name: parts[1].to_string(),
+                memory_total: parts[2].parse()
+                    .context("Invalid memory total")?,
+                memory_used: parts[3].parse()
+                    .context("Invalid memory used")?,
+                temperature: parts[4].parse().ok(),
+                utilization: parts[5].parse()
+                    .unwrap_or(0.0),
+                driver_version: parts[6].to_string(),
+            };
+            gpus.push(gpu);
+        }
+    }
+
+    Ok(SystemGpuInfo {
+        gpu_count: gpus.len(),
+        gpus,
+    })
+}
+
+/// Get GPU memory usage for specific process
+pub fn get_gpu_memory_for_pid(pid: u32) -> Result<Option<u64>> {
+    let output = Command::new("nvidia-smi")
+        .args(&[
+            "--query-compute-apps=pid,used_memory",
+            "--format=csv,noheader,nounits"
+        ])
+        .output()
+        .context("Failed to query GPU processes")?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let output_str = String::from_utf8_lossy(&output.stdout);
+
+    for line in output_str.lines() {
+        let parts: Vec<&str> = line.split(',')
+            .map(|s| s.trim())
+            .collect();
+
+        if parts.len() >= 2 {
+            if let Ok(process_pid) = parts[0].parse::<u32>() {
+                if process_pid == pid {
+                    let memory = parts[1].parse::<u64>().ok();
+                    return Ok(memory);
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+\end{lstlisting}
+
+\section{REST API Implementation}
+\label{sec:code-api}
+
+\subsection{API Endpoint Handlers}
+
+\begin{lstlisting}[language=Rust, caption={REST API Endpoints (src/api.rs)}]
+use actix_web::{get, delete, web, HttpResponse, Responder};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize)]
+struct ProcessListResponse {
+    count: usize,
+    processes: Vec<ProcessInfo>,
+}
+
+#[derive(Deserialize)]
+struct ProcessQueryParams {
+    user: Option<String>,
+    min_cpu: Option<f32>,
+    min_memory: Option<f32>,
+}
+
+/// GET /api/processes - List all processes with filters
+#[get("/api/processes")]
+async fn get_processes(
+    manager: web::Data<Mutex<ProcessManager>>,
+    query: web::Query<ProcessQueryParams>,
+) -> impl Responder {
+    let mut manager = manager.lock().unwrap();
+
+    // Refresh process list
+    if let Err(e) = manager.refresh() {
+        return HttpResponse::InternalServerError()
+            .json(ErrorResponse {
+                error: format!("Failed to refresh: {}", e)
+            });
+    }
+
+    let mut processes: Vec<ProcessInfo> = manager
+        .get_processes()
+        .iter()
+        .map(|p| (*p).clone())
+        .collect();
+
+    // Apply filters
+    if let Some(user) = &query.user {
+        processes.retain(|p| &p.user == user);
+    }
+    if let Some(min_cpu) = query.min_cpu {
+        processes.retain(|p| p.cpu_usage >= min_cpu);
+    }
+    if let Some(min_mem) = query.min_memory {
+        processes.retain(|p| p.memory_percent >= min_mem);
+    }
+
+    HttpResponse::Ok().json(ProcessListResponse {
+        count: processes.len(),
+        processes,
+    })
+}
+
+/// GET /api/processes/:pid - Get specific process
+#[get("/api/processes/{pid}")]
+async fn get_process_by_pid(
+    manager: web::Data<Mutex<ProcessManager>>,
+    pid: web::Path<u32>,
+) -> impl Responder {
+    let mut manager = manager.lock().unwrap();
+    manager.refresh().ok();
+
+    match manager.get_process(*pid) {
+        Some(process) => HttpResponse::Ok().json(process),
+        None => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Process {} not found", pid)
+        }),
+    }
+}
+
+/// DELETE /api/processes/:pid - Kill process
+#[delete("/api/processes/{pid}")]
+async fn kill_process_endpoint(
+    manager: web::Data<Mutex<ProcessManager>>,
+    pid: web::Path<u32>,
+    query: web::Query<KillProcessParams>,
+) -> impl Responder {
+    let manager = manager.lock().unwrap();
+    let signal = query.signal.unwrap_or(15); // Default SIGTERM
+
+    match manager.kill_process(*pid, signal) {
+        Ok(_) => HttpResponse::Ok().json(SuccessResponse {
+            message: format!(
+                "Signal {} sent to process {}",
+                signal, pid
+            )
+        }),
+        Err(e) => {
+            let status = if e.to_string().contains("Permission") {
+                HttpResponse::Forbidden()
+            } else {
+                HttpResponse::InternalServerError()
+            };
+            status.json(ErrorResponse {
+                error: e.to_string()
+            })
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct KillProcessParams {
+    signal: Option<i32>,
+}
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+#[derive(Serialize)]
+struct SuccessResponse {
+    message: String,
+}
+\end{lstlisting}
+
+\section{Historical Data Storage}
+\label{sec:code-history}
+
+\subsection{SQLite Time-Series Storage}
+
+\begin{lstlisting}[language=Rust, caption={Historical Data Manager (src/history.rs)}]
+use rusqlite::{Connection, params};
+use std::sync::Mutex;
+
+pub struct HistoryManager {
+    conn: Mutex<Connection>,
+}
+
+impl HistoryManager {
+    /// Create new history manager with SQLite database
+    pub fn new(db_path: &str) -> Result<Self> {
+        let conn = Connection::open(db_path)
+            .context("Failed to open database")?;
+
+        // Enable Write-Ahead Logging for concurrency
+        conn.execute("PRAGMA journal_mode=WAL", [])
+            .context("Failed to enable WAL")?;
+        conn.execute("PRAGMA synchronous=NORMAL", [])
+            .context("Failed to set synchronous mode")?;
+
+        // Create schema
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS process_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                pid INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                user TEXT NOT NULL,
+                cpu_usage REAL NOT NULL,
+                memory_usage INTEGER NOT NULL,
+                memory_percent REAL NOT NULL,
+                threads INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_timestamp
+                ON process_history(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_pid_timestamp
+                ON process_history(pid, timestamp);
+
+            CREATE TABLE IF NOT EXISTS system_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                cpu_count INTEGER NOT NULL,
+                total_memory INTEGER NOT NULL,
+                used_memory INTEGER NOT NULL,
+                load_avg_1 REAL NOT NULL,
+                load_avg_5 REAL NOT NULL,
+                load_avg_15 REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sys_timestamp
+                ON system_history(timestamp);"
+        ).context("Failed to create schema")?;
+
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    /// Record process snapshot
+    pub fn record_processes(&self, processes: &[ProcessInfo])
+        -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        let timestamp = Utc::now().timestamp();
+
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT INTO process_history VALUES \
+                 (NULL, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )?;
+
+            for process in processes {
+                stmt.execute(params![
+                    timestamp,
+                    process.pid,
+                    process.name,
+                    process.user,
+                    process.cpu_usage,
+                    process.memory_usage,
+                    process.memory_percent,
+                    process.threads,
+                ])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Query historical data for specific process
+    pub fn get_process_history(
+        &self,
+        pid: u32,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ProcessSnapshot>> {
+        let conn = self.conn.lock().unwrap();
+
+        let mut stmt = conn.prepare(
+            "SELECT timestamp, cpu_usage, memory_usage \
+             FROM process_history \
+             WHERE pid = ?1 AND timestamp BETWEEN ?2 AND ?3 \
+             ORDER BY timestamp ASC \
+             LIMIT 10000"
+        )?;
+
+        let snapshots = stmt.query_map(
+            params![pid, start.timestamp(), end.timestamp()],
+            |row| {
+                Ok(ProcessSnapshot {
+                    timestamp: row.get(0)?,
+                    cpu_usage: row.get(1)?,
+                    memory_usage: row.get(2)?,
+                })
+            }
+        )?.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(snapshots)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessSnapshot {
+    pub timestamp: i64,
+    pub cpu_usage: f32,
+    pub memory_usage: u64,
+}
+\end{lstlisting}
+
+\section{Anomaly Detection}
+\label{sec:code-anomaly}
+
+\subsection{Z-Score Based Anomaly Detection}
+
+\begin{lstlisting}[language=Rust, caption={Statistical Anomaly Detection (src/anomaly.rs)}]
+use std::collections::HashMap;
+
+pub struct AnomalyDetector {
+    config: AnomalyDetectorConfig,
+    cpu_baselines: HashMap<u32, Baseline>,
+    memory_baselines: HashMap<u32, Baseline>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Baseline {
+    mean: f32,
+    variance: f32,
+    std_dev: f32,
+    sample_count: usize,
+}
+
+impl Default for Baseline {
+    fn default() -> Self {
+        Self {
+            mean: 0.0,
+            variance: 0.0,
+            std_dev: 0.0,
+            sample_count: 0,
+        }
+    }
+}
+
+impl AnomalyDetector {
+    pub fn new(config: AnomalyDetectorConfig) -> Self {
+        Self {
+            config,
+            cpu_baselines: HashMap::new(),
+            memory_baselines: HashMap::new(),
+        }
+    }
+
+    /// Detect anomalies in process behavior
+    pub fn detect_anomalies(&mut self, process: &ProcessInfo)
+        -> Vec<Anomaly> {
+        let mut anomalies = Vec::new();
+
+        // Update baselines
+        self.update_baseline(process);
+
+        // CPU anomaly detection
+        if let Some(baseline) = self.cpu_baselines.get(&process.pid) {
+            if baseline.sample_count >= self.config.window_size {
+                let z_score = (process.cpu_usage - baseline.mean)
+                             / baseline.std_dev.max(0.1);
+
+                if z_score.abs() > self.config.cpu_threshold {
+                    anomalies.push(Anomaly {
+                        pid: process.pid,
+                        anomaly_type: AnomalyType::HighCpu,
+                        severity: self.calculate_severity(z_score),
+                        value: process.cpu_usage,
+                        baseline: baseline.mean,
+                        z_score,
+                        timestamp: Utc::now(),
+                    });
+                }
+            }
+        }
+
+        // Memory anomaly detection (similar logic)
+        // ...
+
+        anomalies
+    }
+
+    /// Update baseline statistics using exponential moving average
+    fn update_baseline(&mut self, process: &ProcessInfo) {
+        let cpu_baseline = self.cpu_baselines
+            .entry(process.pid)
+            .or_insert(Baseline::default());
+
+        // Exponential moving average with smoothing factor
+        let alpha = 0.1;
+
+        if cpu_baseline.sample_count == 0 {
+            // First sample - initialize
+            cpu_baseline.mean = process.cpu_usage;
+            cpu_baseline.variance = 0.0;
+        } else {
+            // Update mean
+            cpu_baseline.mean = alpha * process.cpu_usage
+                              + (1.0 - alpha) * cpu_baseline.mean;
+
+            // Update variance
+            let diff = process.cpu_usage - cpu_baseline.mean;
+            cpu_baseline.variance = alpha * diff.powi(2)
+                + (1.0 - alpha) * cpu_baseline.variance;
+        }
+
+        cpu_baseline.std_dev = cpu_baseline.variance.sqrt();
+        cpu_baseline.sample_count += 1;
+    }
+
+    fn calculate_severity(&self, z_score: f32) -> Severity {
+        let abs_z = z_score.abs();
+        if abs_z > 4.0 {
+            Severity::Critical
+        } else if abs_z > 3.0 {
+            Severity::High
+        } else if abs_z > 2.0 {
+            Severity::Medium
+        } else {
+            Severity::Low
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Anomaly {
+    pub pid: u32,
+    pub anomaly_type: AnomalyType,
+    pub severity: Severity,
+    pub value: f32,
+    pub baseline: f32,
+    pub z_score: f32,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub enum AnomalyType {
+    HighCpu,
+    HighMemory,
+    ThreadSpike,
+}
+
+#[derive(Debug, Serialize)]
+pub enum Severity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+\end{lstlisting}
+
+\section{Configuration Management}
+\label{sec:code-config}
+
+\subsection{TOML Configuration}
+
+\begin{lstlisting}[language=Rust, caption={Configuration Loading (src/config.rs)}]
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Config {
+    pub general: GeneralConfig,
+    pub api: ApiConfig,
+    pub history: HistoryConfig,
+    pub alerts: AlertsConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GeneralConfig {
+    pub refresh_interval: u64,
+    pub enable_gpu: bool,
+    pub enable_containers: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiConfig {
+    pub enabled: bool,
+    pub port: u16,
+    pub bind_address: String,
+    pub auth_token: Option<String>,
+}
+
+impl Config {
+    /// Load configuration from TOML file
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let contents = fs::read_to_string(path)
+            .context("Failed to read config file")?;
+
+        let config: Config = toml::from_str(&contents)
+            .context("Failed to parse config file")?;
+
+        Ok(config)
+    }
+
+    /// Save configuration to TOML file
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let toml_string = toml::to_string_pretty(self)
+            .context("Failed to serialize config")?;
+
+        fs::write(path, toml_string)
+            .context("Failed to write config file")?;
+
+        Ok(())
+    }
+
+    /// Generate default configuration
+    pub fn default() -> Self {
+        Self {
+            general: GeneralConfig {
+                refresh_interval: 1,
+                enable_gpu: true,
+                enable_containers: true,
+            },
+            api: ApiConfig {
+                enabled: false,
+                port: 8080,
+                bind_address: "0.0.0.0".to_string(),
+                auth_token: None,
+            },
+            history: HistoryConfig {
+                enabled: true,
+                database_path: "/var/lib/pm/history.db".to_string(),
+                retention_days: 7,
+            },
+            alerts: AlertsConfig {
+                enabled: false,
+                cpu_threshold: 80.0,
+                memory_threshold: 90.0,
+            },
+        }
+    }
+}
+\end{lstlisting}
+
+\section{Summary}
+
+This appendix presented key code samples demonstrating:
+
+\begin{itemize}
+    \item Process information structure and basic operations
+    \item /proc filesystem parsing and enhancement
+    \item Container detection via cgroup analysis
+    \item GPU monitoring through vendor-specific tools
+    \item REST API endpoint implementation
+    \item SQLite-based historical data storage
+    \item Statistical anomaly detection algorithms
+    \item Configuration management with TOML
+\end{itemize}
+
+Complete source code with full documentation is available in the project repository at \texttt{src/}.

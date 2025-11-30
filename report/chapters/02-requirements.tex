@@ -1,0 +1,561 @@
+\chapter{Requirements Analysis}
+\label{ch:requirements}
+
+This chapter presents a comprehensive requirements analysis based on extensive survey of existing Linux process management tools, user interviews, online forum discussions, and academic literature. Requirements are categorized into functional and non-functional specifications with clear priorities and acceptance criteria.
+
+\section{Survey Methodology}
+
+To establish requirements, we conducted a systematic survey of the process management ecosystem:
+
+\subsection{Tool Analysis}
+
+We performed hands-on evaluation of the following tools:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Traditional Tools}: \code{ps} (procps-ng 3.3.17), \code{top} (procps-ng 3.3.17), \code{kill}
+    \item \textbf{Enhanced Monitors}: \code{htop} 3.2.1, \code{atop} 2.7.1
+    \item \textbf{Modern Tools}: \code{glances} 3.4.0, \code{bashtop}, \code{btop}
+    \item \textbf{Specialized Tools}: \code{docker stats}, \code{nvidia-smi}, \code{systemd-cgtop}
+\end{itemize}
+
+\subsection{User Research}
+
+Gathered requirements from:
+\begin{itemize}[leftmargin=*]
+    \item System administrator workflows (Reddit r/linuxadmin, r/sysadmin)
+    \item Developer pain points (Stack Overflow, GitHub issues)
+    \item DevOps use cases (DevOps forums, monitoring discussions)
+    \item Academic requirements (Operating Systems textbooks)
+\end{itemize}
+
+\subsection{Gap Analysis}
+
+Identified critical missing features in existing tools:
+\begin{enumerate}[leftmargin=*]
+    \item Container awareness and Kubernetes integration
+    \item GPU monitoring across multiple vendors
+    \item Per-process network attribution
+    \item Historical data for trend analysis
+    \item Remote access capabilities (API, Web UI)
+    \item Anomaly detection and intelligent alerting
+    \item Metrics export to monitoring systems
+    \item Process state comparison and diffing
+\end{enumerate}
+
+\section{Functional Requirements}
+
+Functional requirements define what the system must do, organized by priority levels.
+
+\subsection{Priority 1: Core Features (Must Have)}
+
+\subsubsection{FR1: Process Display}
+
+\textbf{Description:} Display comprehensive information about all running processes.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Show PID, PPID, name, user, CPU\%, memory usage, state
+    \item Update display in real-time with configurable refresh rate
+    \item Support display of 1,000+ processes without performance degradation
+    \item Parse process information from \code{/proc/[pid]/} filesystem
+    \item Handle process creation/termination gracefully
+\end{itemize}
+
+\textbf{Rationale:} Core functionality present in all surveyed tools; essential baseline.
+
+\subsubsection{FR2: Process Control}
+
+\textbf{Description:} Send signals to processes for control and termination.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Support signals: SIGTERM (15), SIGKILL (9), SIGHUP (1), SIGINT (2), SIGSTOP (19), SIGCONT (18), SIGUSR1 (10), SIGUSR2 (12)
+    \item Verify process ownership before sending signals
+    \item Provide interactive signal selection interface
+    \item Display confirmation dialog for destructive operations
+    \item Show success/failure feedback with error messages
+\end{itemize}
+
+\textbf{Rationale:} Essential for process management; addresses safety concerns identified in survey.
+
+\subsubsection{FR3: Sorting}
+
+\textbf{Description:} Sort processes by any displayed column.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Sort by: PID, name, user, CPU\%, memory\%, start time
+    \item Toggle ascending/descending order
+    \item Perform sorting in O(n log n) time or better
+    \item Maintain sort order across refresh cycles
+    \item Provide visual indicator of current sort column
+\end{itemize}
+
+\textbf{Rationale:} Top user request in htop issue tracker; critical for workflow.
+
+\subsubsection{FR4: Filtering}
+
+\textbf{Description:} Filter processes based on criteria.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Filter by username
+    \item Filter by process name pattern (regex support)
+    \item Filter by resource threshold (CPU\% > X, memory > Y)
+    \item Combine multiple filters (AND logic)
+    \item Show filtered count in status bar
+\end{itemize}
+
+\textbf{Rationale:} Frequently requested; reduces information overload.
+
+\subsubsection{FR5: Tree View}
+
+\textbf{Description:} Display parent-child process relationships hierarchically.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Build process tree from PPID relationships
+    \item Show visual tree structure with ASCII art
+    \item Toggle between flat and tree views
+    \item Maintain expand/collapse state
+    \item Navigate tree with keyboard (arrows)
+\end{itemize}
+
+\textbf{Rationale:} Critical for debugging; available in htop but not basic tools.
+
+\subsubsection{FR6: Real-time Updates}
+
+\textbf{Description:} Automatically refresh process information.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Default refresh interval: 1-2 seconds
+    \item Configurable range: 0.1 to 60 seconds
+    \item Pause/resume updates on demand
+    \item Manual refresh on keypress
+    \item Maintain scroll position during updates
+\end{itemize}
+
+\textbf{Rationale:} Standard feature; user feedback emphasized configuration importance.
+
+\subsection{Priority 2: Advanced Features (Should Have)}
+
+\subsubsection{FR7: Network Monitoring}
+
+\textbf{Description:} Track network connections per process.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Count open network connections per process
+    \item Parse \code{/proc/[pid]/fd} and socket inodes
+    \item Match socket inodes to \code{/proc/net/tcp}, \code{/proc/net/udp}
+    \item Display connection count in process list
+    \item Support IPv4 and IPv6
+\end{itemize}
+
+\textbf{Rationale:} Gap identified in survey; critical for troubleshooting network issues.
+
+\subsubsection{FR8: Container Awareness}
+
+\textbf{Description:} Detect and label containerized processes.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Detect Docker containers via cgroup paths
+    \item Detect Kubernetes pods and namespaces
+    \item Support LXC, Podman, containerd
+    \item Show container ID and runtime type
+    \item Display resource limits from cgroups
+    \item Visual indicator (emoji/symbol) for containers
+\end{itemize}
+
+\textbf{Rationale:} Critical gap in traditional tools; essential for cloud-native environments.
+
+\subsubsection{FR9: Historical Data}
+
+\textbf{Description:} Store process metrics over time.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Store data in SQLite database
+    \item Record CPU\%, memory usage, process count
+    \item Configurable recording interval (1-300 seconds)
+    \item Query historical data by time range
+    \item Implement data retention policy (default 30 days)
+    \item Database size limit and automatic cleanup
+\end{itemize}
+
+\textbf{Rationale:} Addresses "wish I could see past data" user request; enables trend analysis.
+
+\subsubsection{FR10: System Graphs}
+
+\textbf{Description:} Visualize system-wide resource usage.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Display CPU usage sparkline
+    \item Display memory usage sparkline
+    \item Use ASCII/Unicode characters for graphs
+    \item Update graphs in real-time
+    \item Toggle graph visibility
+\end{itemize}
+
+\textbf{Rationale:} Visual feedback highly valued in user surveys; improves usability.
+
+\subsubsection{FR11: Process Search}
+
+\textbf{Description:} Search for processes using patterns.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Support regular expressions
+    \item Search process name and command line
+    \item Case-insensitive matching
+    \item Highlight matching processes
+    \item Clear search to show all processes
+\end{itemize}
+
+\textbf{Rationale:} htop GitHub issues frequently request improved search.
+
+\subsubsection{FR12: Batch Operations}
+
+\textbf{Description:} Operate on multiple processes simultaneously.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Multi-select processes (Space key)
+    \item Kill all selected processes
+    \item Stop/continue selected processes
+    \item Visual indication of selection
+    \item Confirmation for batch operations
+\end{itemize}
+
+\textbf{Rationale:} Workflow efficiency; requested by system administrators.
+
+\subsection{Priority 3: Innovative Features (Nice to Have)}
+
+\subsubsection{FR13: GPU Monitoring}
+
+\textbf{Description:} Monitor GPU usage per process.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Support NVIDIA GPUs (\code{nvidia-smi})
+    \item Support AMD GPUs (\code{rocm-smi})
+    \item Support Intel GPUs (\code{intel\_gpu\_top})
+    \item Show GPU memory usage per process
+    \item Graceful degradation if GPU unavailable
+    \item Visual indicator for GPU-using processes
+\end{itemize}
+
+\textbf{Rationale:} Unique feature; addresses ML/gaming user needs.
+
+\subsubsection{FR14: Web UI}
+
+\textbf{Description:} Provide web-based monitoring interface.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Serve HTML/JavaScript interface
+    \item Display process list with sorting
+    \item Support basic process control (kill)
+    \item Auto-refresh with configurable interval
+    \item Mobile-responsive design
+    \item No external dependencies (self-contained)
+\end{itemize}
+
+\textbf{Rationale:} Addresses remote monitoring need; competitive advantage.
+
+\subsubsection{FR15: REST API}
+
+\textbf{Description:} Provide HTTP API for programmatic access.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Implement RESTful endpoints
+    \item List all processes (GET /api/processes)
+    \item Get process details (GET /api/processes/:pid)
+    \item Kill process (POST /api/processes/:pid/kill)
+    \item System information (GET /api/system)
+    \item Historical data (GET /api/history)
+    \item JSON response format
+    \item CORS support for web clients
+\end{itemize}
+
+\textbf{Rationale:} DevOps automation requirement; enables integration.
+
+\subsubsection{FR16: Metrics Export}
+
+\textbf{Description:} Export metrics in standard formats.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Prometheus text exposition format
+    \item InfluxDB line protocol format
+    \item Export to file or stdout
+    \item Include process and system metrics
+    \item Proper metric naming and labels
+\end{itemize}
+
+\textbf{Rationale:} Integration with monitoring stacks; DevOps requirement.
+
+\subsubsection{FR17: Anomaly Detection}
+
+\textbf{Description:} Detect unusual process behavior.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Z-score analysis for CPU spikes (> 3 std deviations)
+    \item Memory growth detection (> 50\% in 1 minute)
+    \item Process count anomalies
+    \item Configurable thresholds
+    \item Alert generation for detected anomalies
+\end{itemize}
+
+\textbf{Rationale:} Proactive monitoring; reduces MTTR for incidents.
+
+\subsubsection{FR18: Kubernetes Integration}
+
+\textbf{Description:} Kubernetes pod-level aggregation.
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Parse pod name from cgroup paths
+    \item Aggregate processes by pod
+    \item Show namespace information
+    \item Track pod resource limits
+    \item Detect sidecar containers
+\end{itemize}
+
+\textbf{Rationale:} Cloud-native requirement; unique feature.
+
+\subsection{Additional Features (Phase IV)}
+
+\subsubsection{FR19: Logging System}
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Structured logging with tracing crate
+    \item Multiple log levels (ERROR, WARN, INFO, DEBUG, TRACE)
+    \item Log rotation (daily, hourly, size-based)
+    \item JSON and plain text formats
+    \item Performance metrics logging
+\end{itemize}
+
+\subsubsection{FR20: CPU Affinity Management}
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Get CPU affinity mask per process
+    \item Set CPU affinity (pin to cores)
+    \item Adjust nice values (-20 to 19)
+    \item View scheduling policy
+    \item Affinity string parsing ("0-3,7-9")
+\end{itemize}
+
+\subsubsection{FR21: Smart Alerts}
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Email notifications (SMTP)
+    \item Webhook notifications (HTTP POST)
+    \item Desktop notifications
+    \item Configurable alert rules
+    \item Cooldown periods to prevent spam
+\end{itemize}
+
+\subsubsection{FR22: Process Snapshots}
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Capture complete system state
+    \item Save snapshots to disk
+    \item Load and compare snapshots
+    \item Export to JSON, CSV, HTML
+    \item Metadata (tags, descriptions)
+\end{itemize}
+
+\subsubsection{FR23: Memory Maps}
+
+\textbf{Acceptance Criteria:}
+\begin{itemize}[leftmargin=*]
+    \item Parse /proc/[pid]/maps
+    \item Categorize regions (code, data, heap, stack, libraries)
+    \item ASCII visualization
+    \item Library usage summary
+    \item Export to CSV and HTML
+\end{itemize}
+
+\section{Non-Functional Requirements}
+
+\subsection{Performance Requirements}
+
+\subsubsection{NFR1: Resource Efficiency}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Memory Usage}: < 10MB base, < 50MB with 1,000 processes
+    \item \textbf{CPU Usage}: < 2\% during normal operation
+    \item \textbf{Startup Time}: < 500ms cold start
+    \item \textbf{Refresh Latency}: < 100ms for process scan
+\end{itemize}
+
+\textbf{Rationale:} Monitor must not impact system performance.
+
+\subsubsection{NFR2: Scalability}
+
+\begin{itemize}[leftmargin=*]
+    \item Support 10,000+ processes without degradation
+    \item Handle 30 days of historical data (1-minute intervals)
+    \item API supports 100+ concurrent users
+    \item Database queries complete in < 50ms
+\end{itemize}
+
+\textbf{Rationale:} Enterprise servers may have thousands of processes.
+
+\subsection{Reliability Requirements}
+
+\subsubsection{NFR3: Error Handling}
+
+\begin{itemize}[leftmargin=*]
+    \item Graceful handling of missing /proc entries
+    \item Recovery from permission denied errors
+    \item Proper cleanup on abnormal termination
+    \item No panic() in production code (except for unrecoverable errors)
+\end{itemize}
+
+\subsubsection{NFR4: Data Integrity}
+
+\begin{itemize}[leftmargin=*]
+    \item SQLite transactions for atomic updates
+    \item Snapshot files include checksums
+    \item Configuration validation on load
+    \item Crash recovery for database
+\end{itemize}
+
+\subsection{Usability Requirements}
+
+\subsubsection{NFR5: User Interface}
+
+\begin{itemize}[leftmargin=*]
+    \item Intuitive keyboard shortcuts similar to htop
+    \item Context-sensitive help (F1/h key)
+    \item Clear status messages for operations
+    \item Color-coding for visual clarity
+    \item Minimum terminal size: 80x24 characters
+\end{itemize}
+
+\subsubsection{NFR6: Documentation}
+
+\begin{itemize}[leftmargin=*]
+    \item Comprehensive README with examples
+    \item Inline code documentation (rustdoc)
+    \item API documentation (OpenAPI/Swagger)
+    \item Man page for CLI usage
+\end{itemize}
+
+\subsection{Security Requirements}
+
+\subsubsection{NFR7: Privilege Management}
+
+\begin{itemize}[leftmargin=*]
+    \item Run with user privileges (no setuid)
+    \item Verify process ownership before signals
+    \item Sanitize user input (regex patterns, file paths)
+    \item No execution of external commands with user input
+\end{itemize}
+
+\subsubsection{NFR8: Memory Safety}
+
+\begin{itemize}[leftmargin=*]
+    \item Leverage Rust's ownership system
+    \item No buffer overflows or use-after-free
+    \item Minimize unsafe code blocks
+    \item Audit unsafe code in code review
+\end{itemize}
+
+\subsection{Compatibility Requirements}
+
+\subsubsection{NFR9: Platform Support}
+
+\begin{itemize}[leftmargin=*]
+    \item Linux kernel 3.10+ (RHEL 7 baseline)
+    \item Support x86\_64 and ARM64 architectures
+    \item Compatible with glibc and musl
+    \item Tested on: Ubuntu 18.04+, Debian 10+, RHEL 7+, Arch Linux
+\end{itemize}
+
+\subsubsection{NFR10: Build System}
+
+\begin{itemize}[leftmargin=*]
+    \item Cargo for dependency management
+    \item Static linking option for portability
+    \item Reproducible builds
+    \item CI/CD ready (GitHub Actions, GitLab CI)
+\end{itemize}
+
+\subsection{Maintainability Requirements}
+
+\subsubsection{NFR11: Code Quality}
+
+\begin{itemize}[leftmargin=*]
+    \item Pass \code{cargo clippy} with no warnings
+    \item Formatted with \code{cargo fmt}
+    \item Modular architecture (< 500 lines per file recommended)
+    \item Test coverage > 80\%
+\end{itemize}
+
+\subsubsection{NFR12: Testing}
+
+\begin{itemize}[leftmargin=*]
+    \item Unit tests for all modules
+    \item Integration tests for features
+    \item Performance benchmarks
+    \item Continuous integration
+\end{itemize}
+
+\section{Requirements Traceability Matrix}
+
+Table \ref{tab:traceability} maps requirements to implementation modules and test cases.
+
+\begin{table}[H]
+\centering
+\caption{Requirements Traceability Matrix (Sample)}
+\label{tab:traceability}
+\small
+\begin{tabularx}{\textwidth}{|l|X|l|l|}
+\hline
+\textbf{Req ID} & \textbf{Requirement} & \textbf{Module} & \textbf{Tests} \\
+\hline
+FR1 & Process Display & process.rs, ui.rs & test\_process\_refresh \\
+\hline
+FR2 & Process Control & main.rs & test\_signal\_handling \\
+\hline
+FR3 & Sorting & main.rs & test\_sorting \\
+\hline
+FR8 & Container Awareness & containers.rs & test\_container\_detection \\
+\hline
+FR13 & GPU Monitoring & gpu.rs & test\_gpu\_detection \\
+\hline
+FR15 & REST API & api.rs & test\_api\_endpoints \\
+\hline
+NFR1 & Resource Efficiency & All modules & benchmarks.rs \\
+\hline
+NFR7 & Privilege Management & main.rs, process.rs & test\_permissions \\
+\hline
+\end{tabularx}
+\end{table}
+
+\section{Requirements Validation}
+
+Requirements were validated through:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Prototype Testing}: Early prototype validated core requirements with users
+    \item \textbf{Comparison Analysis}: Feature matrix compared against htop, glances, atop
+    \item \textbf{Peer Review}: Requirements reviewed by course instructor and peers
+    \item \textbf{Acceptance Testing}: Each requirement has objective acceptance criteria
+\end{enumerate}
+
+\section{Summary}
+
+This chapter established comprehensive requirements based on systematic survey and gap analysis. The requirements are organized by priority (must have, should have, nice to have) and category (functional, non-functional). All requirements include clear acceptance criteria and rationale. The next chapter details the architectural design that fulfills these requirements.

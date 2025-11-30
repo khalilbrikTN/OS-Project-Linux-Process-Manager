@@ -1,0 +1,225 @@
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Project Motivation}
+
+Process management is a fundamental aspect of operating systems, serving as the foundation for resource allocation, security enforcement, and system performance optimization. System administrators, developers, and DevOps engineers rely daily on process management tools to monitor system health, diagnose performance issues, and control running applications. However, traditional Linux process management tools exhibit significant limitations in modern cloud-native and containerized environments.
+
+\subsection{Limitations of Existing Tools}
+
+\textbf{Traditional Command-Line Tools (\code{ps}, \code{top}):}
+\begin{itemize}[leftmargin=*]
+    \item Limited to basic process information (PID, CPU, memory)
+    \item No container or cgroup awareness
+    \item Static output (\code{ps}) or basic real-time display (\code{top})
+    \item No network or GPU resource tracking
+    \item Lack of historical data for trend analysis
+    \item No programmatic access for automation
+\end{itemize}
+
+\textbf{Interactive Tools (\code{htop}):}
+\begin{itemize}[leftmargin=*]
+    \item Better user experience but still missing modern features
+    \item No container detection or Kubernetes awareness
+    \item No GPU monitoring capabilities
+    \item Cannot export metrics to monitoring systems
+    \item No remote access without SSH
+    \item No anomaly detection or intelligent alerting
+\end{itemize}
+
+\textbf{Specialized Tools (\code{docker stats}, \code{nvidia-smi}):}
+\begin{itemize}[leftmargin=*]
+    \item Fragmented tooling requires switching between multiple applications
+    \item No unified view of system, container, and GPU resources
+    \item Difficult to correlate metrics across different resource types
+    \item Inconsistent interfaces and data formats
+\end{itemize}
+
+\subsection{Modern Requirements}
+
+The evolution of computing infrastructure introduces new monitoring requirements:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Container Awareness}: With Docker and Kubernetes adoption, distinguishing containerized processes from host processes is essential for resource accounting and troubleshooting.
+
+    \item \textbf{GPU Monitoring}: Machine learning, scientific computing, and graphics applications demand GPU resource visibility at the process level.
+
+    \item \textbf{Remote Access}: Cloud infrastructure and remote work necessitate monitoring capabilities without SSH access, preferably via web interfaces or APIs.
+
+    \item \textbf{Integration}: Modern DevOps workflows require metrics export to systems like Prometheus, Grafana, and InfluxDB.
+
+    \item \textbf{Automation}: Programmatic access enables automated responses to resource issues, capacity planning, and CI/CD integration.
+
+    \item \textbf{Historical Analysis}: Troubleshooting intermittent issues requires time-series data to identify patterns and trends.
+\end{enumerate}
+
+\section{Project Objectives}
+
+The Linux Process Manager (LPM) project aims to address these limitations by developing a comprehensive, modern process monitoring and control system with the following objectives:
+
+\subsection{Primary Objectives}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Unified Monitoring}: Provide a single interface for viewing CPU, memory, network, GPU, and container resources, eliminating the need for multiple tools.
+
+    \item \textbf{Container-Native}: Implement first-class support for Docker, Kubernetes, Podman, and LXC with resource limit visibility.
+
+    \item \textbf{Multi-Vendor GPU Support}: Integrate NVIDIA, AMD, and Intel GPU monitoring with per-process attribution.
+
+    \item \textbf{Modern Architecture}: Build with memory-safe Rust for reliability and performance, avoiding common vulnerabilities in C/C++ implementations.
+
+    \item \textbf{Multiple Interfaces}: Support terminal UI for interactive use, REST API for automation, and web UI for remote access.
+
+    \item \textbf{Historical Data}: Store time-series metrics for trend analysis and performance baseline comparison.
+
+    \item \textbf{Intelligent Monitoring}: Implement statistical anomaly detection with configurable alerts.
+\end{enumerate}
+
+\subsection{Secondary Objectives}
+
+\begin{enumerate}[leftmargin=*]
+    \item Achieve production-quality code with comprehensive testing
+    \item Minimize resource overhead (CPU and memory usage)
+    \item Ensure compatibility across major Linux distributions
+    \item Provide extensive documentation and usage examples
+    \item Design extensible architecture for future enhancements
+\end{enumerate}
+
+\section{Project Scope}
+
+\subsection{In Scope}
+
+\begin{itemize}[leftmargin=*]
+    \item Process enumeration and monitoring via Linux \code{/proc} filesystem
+    \item Interactive terminal user interface (TUI)
+    \item Process control (signal sending, priority adjustment)
+    \item Container detection and resource tracking
+    \item GPU monitoring (NVIDIA, AMD, Intel)
+    \item Network connection counting per process
+    \item Historical data storage (SQLite)
+    \item REST API server
+    \item Web-based user interface
+    \item Metrics export (Prometheus, InfluxDB)
+    \item Anomaly detection and alerting
+    \item CPU affinity and priority management
+    \item Process snapshots and comparison
+    \item Memory map visualization
+\end{itemize}
+
+\subsection{Out of Scope}
+
+\begin{itemize}[leftmargin=*]
+    \item Cross-platform support (Windows, macOS) - Linux-only
+    \item eBPF-based network bandwidth tracking (future enhancement)
+    \item Distributed multi-host monitoring
+    \item Process execution or scheduling (read-only except for signals)
+    \item Kernel module development
+    \item Real-time operating system features
+\end{itemize}
+
+\section{Report Organization}
+
+This report is organized as follows:
+
+\textbf{Chapter \ref{ch:requirements} - Requirements Analysis:} Presents functional and non-functional requirements derived from extensive survey of existing tools and user needs.
+
+\textbf{Chapter \ref{ch:architecture} - Architecture and Design:} Details the system architecture, including high-level diagrams, module organization, data structures, and concurrency model.
+
+\textbf{Chapter \ref{ch:implementation} - Implementation:} Describes implementation details, language choice rationale, major modules, algorithms, and challenges encountered.
+
+\textbf{Chapter \ref{ch:usage} - Usage Guide:} Provides comprehensive instructions for building, installing, and using the tool with examples and screenshots.
+
+\textbf{Chapter \ref{ch:testing} - Testing and Evaluation:} Documents the test plan, results, and performance benchmarks including CPU/memory overhead and latency measurements.
+
+\textbf{Chapter \ref{ch:security} - Security and Resilience:} Analyzes security considerations, privilege management, and error handling strategies.
+
+\textbf{Chapter \ref{ch:evaluation} - Evaluation and Discussion:} Evaluates the system against requirements, discusses limitations, and proposes future improvements.
+
+\textbf{Chapter \ref{ch:conclusions} - Conclusions:} Summarizes achievements, lessons learned, and project impact.
+
+\textbf{Appendices:} Include complete code samples, detailed benchmark results, additional screenshots, and API documentation.
+
+\section{Contributions}
+
+This project was developed collaboratively with the following role distribution:
+
+\begin{table}[H]
+\centering
+\caption{Team Member Contributions and Roles}
+\label{tab:contributions}
+\begin{tabularx}{\textwidth}{|l|X|}
+\hline
+\textbf{Team Member} & \textbf{Primary Responsibilities} \\
+\hline
+Adam Aberbach &
+Core process monitoring (\code{process.rs}), Terminal UI (\code{ui.rs}), Tree view, Project architecture, Testing framework \\
+\hline
+Mohammad Yahya Hammoudeh &
+GPU monitoring (\code{gpu.rs}), Container detection (\code{containers.rs}, \code{network.rs}), Anomaly detection (\code{anomaly.rs}), Performance optimization \\
+\hline
+Mohamed Khalil Brik &
+REST API (\code{api.rs}), Web UI, Metrics export (\code{metrics.rs}), Historical data (\code{history.rs}), API documentation \\
+\hline
+Ahmed Elaswar &
+CPU affinity (\code{affinity.rs}), Alerts system (\code{alerts.rs}), Snapshots (\code{snapshots.rs}), Memory maps (\code{memmap.rs}), Documentation \\
+\hline
+\multicolumn{2}{|l|}{\textit{All members contributed to: Requirements analysis, Testing, Documentation, Report writing}} \\
+\hline
+\end{tabularx}
+\end{table}
+
+\section{Development Timeline}
+
+\begin{table}[H]
+\centering
+\caption{Project Development Phases}
+\label{tab:timeline}
+\begin{tabularx}{\textwidth}{|l|X|l|}
+\hline
+\textbf{Phase} & \textbf{Activities} & \textbf{Duration} \\
+\hline
+Phase 0 & Requirements gathering, tool survey, feasibility study & 2 weeks \\
+\hline
+Phase I & Core features (process display, control, sorting, filtering, tree view, real-time updates) & 3 weeks \\
+\hline
+Phase II & Advanced features (network monitoring, container awareness, historical data, system graphs, search, batch operations) & 3 weeks \\
+\hline
+Phase III & Innovative features (GPU monitoring, Web UI, REST API, metrics export, anomaly detection, Kubernetes integration) & 3 weeks \\
+\hline
+Phase IV & Additional features (logging, CPU affinity, alerts, snapshots, process groups, memory maps, profiles, diffing, enhanced containers) & 2 weeks \\
+\hline
+Phase V & Testing, optimization, documentation, report & 2 weeks \\
+\hline
+\multicolumn{2}{|l|}{\textbf{Total Duration}} & \textbf{15 weeks} \\
+\hline
+\end{tabularx}
+\end{table}
+
+\section{Key Technologies}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Programming Language}: Rust 2021 Edition (1.70+)
+    \item \textbf{UI Framework}: ratatui 0.24 (Terminal UI)
+    \item \textbf{Web Framework}: Actix-web 4.0 (REST API)
+    \item \textbf{Database}: rusqlite 0.29 (SQLite)
+    \item \textbf{System Info}: sysinfo 0.29, nix 0.27
+    \item \textbf{Async Runtime}: tokio 1.0
+    \item \textbf{Build System}: Cargo (Rust package manager)
+    \item \textbf{Testing}: Rust built-in test framework, Criterion for benchmarks
+    \item \textbf{Version Control}: Git
+\end{itemize}
+
+\section{Expected Outcomes}
+
+Upon completion, the Linux Process Manager is expected to:
+
+\begin{enumerate}[leftmargin=*]
+    \item Serve as a drop-in replacement for traditional tools (\code{top}, \code{htop}) with enhanced capabilities
+    \item Reduce monitoring tool fragmentation by unifying process, container, and GPU visibility
+    \item Enable DevOps automation through comprehensive REST API
+    \item Improve troubleshooting efficiency with historical data and anomaly detection
+    \item Demonstrate best practices in systems programming with Rust
+    \item Provide educational value as a reference implementation for operating systems concepts
+\end{enumerate}
+
+The following chapters detail how these objectives were achieved through systematic design, implementation, and validation.

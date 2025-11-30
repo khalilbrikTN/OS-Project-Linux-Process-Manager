@@ -1,0 +1,650 @@
+\chapter{Usage Guide}
+\label{chap:usage}
+
+This chapter provides comprehensive instructions for building, installing, and using the Linux Process Manager across its three primary operational modes: interactive Terminal User Interface (TUI), REST API server, and metrics export. Screenshots and detailed examples illustrate key features and workflows.
+
+\section{System Requirements}
+\label{sec:requirements}
+
+\subsection{Minimum Requirements}
+
+\begin{itemize}
+    \item \textbf{Operating System}: Linux kernel 3.10 or later (4.x+ recommended)
+    \item \textbf{Architecture}: x86\_64 or ARM64
+    \item \textbf{Memory}: 64 MB RAM (256 MB recommended)
+    \item \textbf{Disk Space}: 50 MB for binary and dependencies
+    \item \textbf{Terminal}: ANSI color support, minimum 80x24 characters
+\end{itemize}
+
+\subsection{Optional Components}
+
+For full feature availability:
+
+\begin{itemize}
+    \item \textbf{GPU Monitoring}:
+    \begin{itemize}
+        \item NVIDIA: nvidia-smi (CUDA Toolkit 10.0+)
+        \item AMD: rocm-smi (ROCm 4.0+)
+        \item Intel: intel\_gpu\_top (available in linux-tools)
+    \end{itemize}
+    \item \textbf{Container Awareness}: Docker 19.03+, Podman 2.0+, or Kubernetes 1.20+
+    \item \textbf{Historical Data}: SQLite 3.x (bundled with Rust build)
+    \item \textbf{API Server}: Network connectivity for remote access
+\end{itemize}
+
+\section{Building and Installation}
+\label{sec:installation}
+
+\subsection{Building from Source}
+
+The project requires Rust 1.70 or later. Install Rust via rustup if not present:
+
+\begin{lstlisting}[language=bash, caption={Installing Rust Toolchain}]
+curl --proto '=https' --tlsv1.2 -sSf \
+    https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+\end{lstlisting}
+
+Clone and build the project:
+
+\begin{lstlisting}[language=bash, caption={Building Process Manager}]
+# Clone repository
+git clone <repository-url>
+cd process-manager
+
+# Build release binary (optimized)
+cargo build --release
+
+# Binary location
+./target/release/process-manager
+
+# Verify build
+./target/release/process-manager --version
+\end{lstlisting}
+
+The release build applies optimization level 3 and link-time optimization (LTO), producing a ~8MB statically-linked binary with no runtime dependencies beyond libc.
+
+\subsection{System-Wide Installation}
+
+Install the binary system-wide for all users:
+
+\begin{lstlisting}[language=bash, caption={System Installation}]
+# Install to /usr/local/bin
+sudo cp target/release/process-manager /usr/local/bin/
+
+# Set permissions
+sudo chmod 755 /usr/local/bin/process-manager
+
+# Verify installation
+which process-manager
+process-manager --version
+\end{lstlisting}
+
+\subsection{Configuration File Setup}
+
+Generate a default configuration file:
+
+\begin{lstlisting}[language=bash, caption={Configuration Setup}]
+# Create config directory
+mkdir -p ~/.config/process-manager
+
+# Generate default config
+process-manager --generate-config \
+    ~/.config/process-manager/config.toml
+
+# Edit configuration
+nano ~/.config/process-manager/config.toml
+\end{lstlisting}
+
+Key configuration options include refresh rate, history database path, API settings, and alert rules. See Appendix~\ref{app:config} for full configuration reference.
+
+\section{Interactive TUI Mode}
+\label{sec:tui-usage}
+
+\subsection{Launching the TUI}
+
+The default operation mode presents an interactive terminal interface:
+
+\begin{lstlisting}[language=bash, caption={Launching TUI Mode}]
+# Basic launch (default 1-second refresh)
+process-manager
+
+# Custom refresh interval (2 seconds)
+process-manager --refresh 2
+
+# Start in tree view
+process-manager --tree
+
+# Filter by user
+process-manager --user john
+
+# Combine options
+process-manager --refresh 2 --tree --user root
+\end{lstlisting}
+
+\subsection{User Interface Layout}
+
+Figure~\ref{fig:tui-main} illustrates the main TUI layout comprising three sections:
+
+\begin{figure}[h]
+\centering
+\begin{verbatim}
+┌─────────────────────────────────────────────────────────────────┐
+│ CPU: 8 cores | Load: 1.2, 1.5, 1.8 | Mem: 45.2% (7.2G/16G)    │
+│ Swap: 2.1% (512M/24G) | Uptime: 5d 14h 23m                      │
+├─────────────────────────────────────────────────────────────────┤
+│ PID   │ User    │ CPU%  │ MEM%  │ Memory   │ Name              │
+│ 1234  │ john    │ 45.2  │ 12.3  │ 1.2G     │ firefox          │
+│ 5678  │ john    │ 23.1  │ 8.5   │ 512M     │ code             │
+│ 9012  │ root    │ 5.3   │ 2.1   │ 128M     │ systemd          │
+│ ...                                                             │
+├─────────────────────────────────────────────────────────────────┤
+│ Status: Monitoring 245 processes | q:Quit k:Kill /:Search      │
+└─────────────────────────────────────────────────────────────────┘
+\end{verbatim}
+\caption{TUI Main Interface Layout}
+\label{fig:tui-main}
+\end{figure}
+
+\begin{enumerate}
+    \item \textbf{System Information Bar} (Top): Displays CPU count, load averages, memory/swap usage, and system uptime.
+    \item \textbf{Process Table} (Center): Lists processes with sortable columns. Selected process highlighted in blue.
+    \item \textbf{Status Bar} (Bottom): Shows current status, process count, and quick-reference keyboard shortcuts.
+\end{enumerate}
+
+\subsection{Keyboard Navigation}
+
+Table~\ref{tab:keyboard-shortcuts} summarizes all keyboard controls.
+
+\begin{table}[h]
+\centering
+\caption{TUI Keyboard Shortcuts}
+\label{tab:keyboard-shortcuts}
+\begin{tabular}{|l|p{10cm}|}
+\hline
+\textbf{Key} & \textbf{Action} \\ \hline
+\multicolumn{2}{|c|}{\textit{Navigation}} \\ \hline
+$\uparrow$ / $\downarrow$ & Move selection up/down in process list \\ \hline
+Page Up/Down & Scroll one page up/down \\ \hline
+Home / End & Jump to first/last process \\ \hline
+\multicolumn{2}{|c|}{\textit{Sorting}} \\ \hline
+\texttt{p} & Sort by PID (Process ID) \\ \hline
+\texttt{n} & Sort by process name (alphabetical) \\ \hline
+\texttt{u} & Sort by username \\ \hline
+\texttt{c} & Sort by CPU usage (descending) \\ \hline
+\texttt{m} & Sort by memory usage (descending) \\ \hline
+\texttt{s} & Sort by start time (newest first) \\ \hline
+\multicolumn{2}{|c|}{\textit{Filtering and Search}} \\ \hline
+\texttt{/} & Enter search mode (regex support) \\ \hline
+\texttt{o} & Toggle user processes only filter \\ \hline
+\texttt{Esc} & Clear search/filter \\ \hline
+\multicolumn{2}{|c|}{\textit{View Modes}} \\ \hline
+\texttt{t} & Toggle tree view (parent-child hierarchy) \\ \hline
+\texttt{g} & Toggle system resource graphs (CPU/memory sparklines) \\ \hline
+\texttt{Tab} & Cycle through view tabs (processes/containers/GPU) \\ \hline
+\multicolumn{2}{|c|}{\textit{Process Control}} \\ \hline
+\texttt{k} & Open kill dialog for selected process \\ \hline
+\texttt{a} & Open CPU affinity dialog \\ \hline
+\texttt{r} & Change process priority (renice) \\ \hline
+\multicolumn{2}{|c|}{\textit{General}} \\ \hline
+\texttt{r} / \texttt{F5} & Force refresh process list \\ \hline
+\texttt{h} / \texttt{F1} & Toggle help overlay \\ \hline
+\texttt{q} & Quit application \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Process Control: Kill Dialog}
+
+Pressing \texttt{k} on a selected process opens the signal selection dialog (Figure~\ref{fig:kill-dialog}):
+
+\begin{figure}[h]
+\centering
+\begin{verbatim}
+┌─── Send Signal to Process 1234 (firefox) ───────────┐
+│                                                      │
+│  Select signal to send:                             │
+│                                                      │
+│  [t] SIGTERM (15) - Graceful termination            │
+│  [9] SIGKILL (9)  - Force kill (cannot be caught)   │
+│  [1] SIGHUP (1)   - Hangup (reload config)          │
+│  [2] SIGINT (2)   - Interrupt (Ctrl+C)              │
+│  [s] SIGSTOP (19) - Suspend process                 │
+│  [c] SIGCONT (18) - Continue suspended process      │
+│                                                      │
+│  [Enter] Confirm    [Esc] Cancel                    │
+└──────────────────────────────────────────────────────┘
+\end{verbatim}
+\caption{Kill Dialog Signal Selection}
+\label{fig:kill-dialog}
+\end{figure}
+
+The dialog validates process ownership before sending signals. Attempting to kill a process owned by another user displays a permission error unless running as root.
+
+\subsection{Search and Filtering}
+
+The search function supports full regular expressions:
+
+\begin{lstlisting}[language=bash, caption={Search Examples}]
+# Press '/' to enter search mode
+
+# Search for all Chrome/Chromium processes
+/chrom[e|ium]
+
+# Find all processes with "server" in name
+/server
+
+# Match processes starting with "docker"
+/^docker
+
+# Case-insensitive Python processes
+/python.*
+
+# Clear search
+/<Enter on empty pattern>
+\end{lstlisting}
+
+The search matches against both process name and full command line, with matches highlighted in the process list.
+
+\subsection{Tree View Mode}
+
+Pressing \texttt{t} toggles hierarchical tree view showing parent-child process relationships (Figure~\ref{fig:tree-view}):
+
+\begin{figure}[h]
+\centering
+\begin{verbatim}
+PID   │ User    │ CPU%  │ MEM%  │ Name
+──────┼─────────┼───────┼───────┼─────────────────────────
+1     │ root    │ 0.1   │ 0.5   │ systemd
+├─ 456│ root    │ 0.2   │ 1.2   │   ├─ NetworkManager
+├─ 789│ john    │ 5.3   │ 8.1   │   ├─ gnome-session
+│ ├─123│ john  │ 2.1   │ 3.5   │       ├─ gnome-terminal
+│ │ ├─124│ john│ 0.8   │ 2.1   │           ├─ bash
+│ │ │ └─125│john│15.2  │ 12.3  │               └─ python3
+\end{verbatim}
+\caption{Tree View Display}
+\label{fig:tree-view}
+\end{figure}
+
+Tree view uses Unicode box-drawing characters to visualize process ancestry. Indentation indicates nesting level, facilitating identification of daemon processes and their children.
+
+\subsection{System Resource Graphs}
+
+Pressing \texttt{g} enables real-time sparkline graphs for CPU and memory usage (Figure~\ref{fig:graphs}):
+
+\begin{figure}[h]
+\centering
+\begin{verbatim}
+┌─── System Resources ─────────────────────────────────┐
+│ CPU:  [▂▃▅▇▆▅▄▃▂▁▂▃▄▅▆▇▅▄▃] 45.2%  (8 cores)        │
+│ MEM:  [▃▃▄▄▅▅▆▆▆▇▇▇▆▆▅▅▄▄▃] 7.2G / 16G (45.2%)     │
+│ SWAP: [▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁] 512M / 24G (2.1%)      │
+└──────────────────────────────────────────────────────┘
+\end{verbatim}
+\caption{Resource Graphs Display}
+\label{fig:graphs}
+\end{figure}
+
+Sparklines provide historical context (last 60 seconds) for system-wide resource consumption.
+
+\section{REST API Server Mode}
+\label{sec:api-usage}
+
+\subsection{Starting the API Server}
+
+Launch the HTTP API server on a specified port:
+
+\begin{lstlisting}[language=bash, caption={Starting API Server}]
+# Default port 8080
+process-manager --api
+
+# Custom port
+process-manager --api --api-port 3000
+
+# With authentication (configured in config.toml)
+process-manager --api --config /etc/pm/config.toml
+\end{lstlisting}
+
+The server binds to \texttt{0.0.0.0} and accepts connections on all network interfaces. CORS is enabled for web UI access.
+
+\subsection{API Endpoint Overview}
+
+Table~\ref{tab:api-endpoints} summarizes available REST endpoints.
+
+\begin{table}[h]
+\centering
+\caption{REST API Endpoints}
+\label{tab:api-endpoints}
+\begin{tabular}{|l|l|p{6cm}|}
+\hline
+\textbf{Method} & \textbf{Endpoint} & \textbf{Description} \\ \hline
+GET & \texttt{/api/processes} & List all processes with filters \\ \hline
+GET & \texttt{/api/processes/:pid} & Get specific process details \\ \hline
+DELETE & \texttt{/api/processes/:pid} & Kill process (send signal) \\ \hline
+GET & \texttt{/api/system} & System information and stats \\ \hline
+GET & \texttt{/api/gpu} & GPU information and usage \\ \hline
+GET & \texttt{/api/containers} & List detected containers \\ \hline
+GET & \texttt{/api/history/processes/:pid} & Historical data for process \\ \hline
+GET & \texttt{/api/history/system} & System resource history \\ \hline
+GET & \texttt{/api/metrics} & Prometheus-format metrics \\ \hline
+\end{tabular}
+\end{table}
+
+Complete API documentation with request/response schemas is provided in Appendix~\ref{app:api}.
+
+\subsection{API Usage Examples}
+
+\subsubsection{Listing Processes with Filters}
+
+\begin{lstlisting}[language=bash, caption={API Process List Request}]
+# Get all processes
+curl http://localhost:8080/api/processes
+
+# Filter by user
+curl http://localhost:8080/api/processes?user=john
+
+# Filter by CPU threshold (>10%)
+curl http://localhost:8080/api/processes?min_cpu=10.0
+
+# Combine filters
+curl "http://localhost:8080/api/processes?user=john&min_cpu=5.0"
+\end{lstlisting}
+
+Response format (JSON):
+
+\begin{lstlisting}[language=json, caption={Process List Response}]
+{
+  "count": 2,
+  "processes": [
+    {
+      "pid": 1234,
+      "ppid": 1,
+      "name": "firefox",
+      "command": "/usr/bin/firefox",
+      "user": "john",
+      "cpu_usage": 45.2,
+      "memory_usage": 1234567,
+      "memory_percent": 12.3,
+      "status": "Running",
+      "threads": 89,
+      "network_connections": 42,
+      "is_container": false,
+      "gpu_memory": 512
+    },
+    ...
+  ]
+}
+\end{lstlisting}
+
+\subsubsection{Killing a Process}
+
+\begin{lstlisting}[language=bash, caption={Kill Process API Request}]
+# Send SIGTERM (graceful)
+curl -X DELETE \
+  http://localhost:8080/api/processes/1234?signal=15
+
+# Send SIGKILL (force)
+curl -X DELETE \
+  http://localhost:8080/api/processes/1234?signal=9
+\end{lstlisting}
+
+Response indicates success or error with appropriate HTTP status codes (200 OK, 403 Forbidden, 404 Not Found).
+
+\subsection{Web UI Access}
+
+The included web UI (\texttt{web/index.html}) provides a browser-based interface to the API:
+
+\begin{lstlisting}[language=bash, caption={Accessing Web UI}]
+# Start API server
+process-manager --api --api-port 8080
+
+# Open web UI in browser
+firefox web/index.html
+
+# Or serve via HTTP server
+cd web
+python3 -m http.server 8000
+# Access http://localhost:8000
+\end{lstlisting}
+
+The web UI features real-time updates via periodic polling, sortable/filterable process table, and point-and-click process control.
+
+\subsection{Programmatic API Clients}
+
+Three example client scripts demonstrate API integration:
+
+\subsubsection{Shell Script Client (\texttt{examples/api\_client.sh})}
+
+Interactive menu-driven bash client:
+
+\begin{lstlisting}[language=bash, caption={Shell API Client Usage}]
+chmod +x examples/api_client.sh
+./examples/api_client.sh
+
+# Menu options:
+# 1. List all processes
+# 2. Search by user
+# 3. Filter by CPU usage
+# 4. Get system info
+# 5. Kill process
+\end{lstlisting}
+
+\subsubsection{CSV Export Script (\texttt{examples/api\_export\_csv.py})}
+
+Exports current process snapshot to CSV:
+
+\begin{lstlisting}[language=bash, caption={CSV Export Usage}]
+python3 examples/api_export_csv.py > processes.csv
+
+# Produces CSV with columns:
+# PID,Name,User,CPU%,Memory%,Memory(KB),Command
+\end{lstlisting}
+
+\subsubsection{CPU Monitoring Script (\texttt{examples/api\_monitor\_cpu.py})}
+
+Continuous monitoring with alert threshold:
+
+\begin{lstlisting}[language=bash, caption={CPU Monitor Usage}]
+# Alert on processes exceeding 50% CPU
+python3 examples/api_monitor_cpu.py --threshold 50
+
+# Sample output:
+# ALERT: Process 1234 (firefox) CPU: 78.3%
+# ALERT: Process 5678 (chrome) CPU: 65.1%
+\end{lstlisting}
+
+\section{Metrics Export Mode}
+\label{sec:export-usage}
+
+\subsection{Prometheus Export}
+
+Export process and system metrics in Prometheus text format:
+
+\begin{lstlisting}[language=bash, caption={Prometheus Export}]
+# Export to file
+process-manager --export prometheus \
+    --export-file /var/lib/prometheus/node_exporter/pm.prom
+
+# Export to stdout
+process-manager --export prometheus
+\end{lstlisting}
+
+Prometheus output example:
+
+\begin{lstlisting}[caption={Prometheus Metrics Format}]
+# HELP process_cpu_usage Process CPU usage percentage
+# TYPE process_cpu_usage gauge
+process_cpu_usage{pid="1234",name="firefox",user="john"} 45.2
+
+# HELP process_memory_bytes Process memory usage in bytes
+# TYPE process_memory_bytes gauge
+process_memory_bytes{pid="1234",name="firefox"} 1263820800
+
+# HELP system_cpu_count Number of CPU cores
+# TYPE system_cpu_count gauge
+system_cpu_count 8
+
+# HELP system_load_average System load average
+# TYPE system_load_average gauge
+system_load_average{period="1m"} 1.2
+system_load_average{period="5m"} 1.5
+system_load_average{period="15m"} 1.8
+\end{lstlisting}
+
+\subsection{InfluxDB Export}
+
+Export in InfluxDB line protocol format:
+
+\begin{lstlisting}[language=bash, caption={InfluxDB Export}]
+# Export to InfluxDB
+process-manager --export influxdb | \
+  curl -XPOST 'http://localhost:8086/write?db=processes' \
+    --data-binary @-
+
+# Save to file
+process-manager --export influxdb > metrics.influx
+\end{lstlisting}
+
+InfluxDB line protocol format:
+
+\begin{lstlisting}[caption={InfluxDB Metrics Format}]
+processes,pid=1234,name=firefox,user=john \
+  cpu_usage=45.2,memory_bytes=1263820800 1635724800000000000
+
+system,host=server1 cpu_count=8,load_1m=1.2,\
+  load_5m=1.5,load_15m=1.8 1635724800000000000
+\end{lstlisting}
+
+\subsection{Continuous Export with Cron}
+
+Set up periodic metrics export via cron:
+
+\begin{lstlisting}[language=bash, caption={Cron Setup for Periodic Export}]
+# Edit crontab
+crontab -e
+
+# Add entry to export every 5 minutes
+*/5 * * * * /usr/local/bin/process-manager \
+  --export prometheus \
+  --export-file /var/metrics/pm_$(date +\%s).prom
+\end{lstlisting}
+
+\section{Common Usage Workflows}
+\label{sec:workflows}
+
+\subsection{Identifying High-CPU Processes}
+
+\begin{lstlisting}[language=bash, caption={High CPU Workflow}]
+# Launch TUI
+process-manager
+
+# Press 'c' to sort by CPU usage (descending)
+# Top processes shown first
+
+# Press 'k' on high-CPU process to open kill dialog
+# Select SIGTERM (t) for graceful shutdown
+\end{lstlisting}
+
+\subsection{Monitoring Container Resources}
+
+\begin{lstlisting}[language=bash, caption={Container Monitoring Workflow}]
+# Filter to show only containerized processes
+process-manager --api
+
+# Query API
+curl "http://localhost:8080/api/processes" | \
+  jq '.processes[] | select(.is_container == true)'
+
+# Or use TUI with filter
+# In TUI, processes show container emoji badge
+\end{lstlisting}
+
+\subsection{Historical Analysis}
+
+\begin{lstlisting}[language=bash, caption={Historical Analysis Workflow}]
+# Run with history enabled
+process-manager --history-db /var/lib/pm/history.db
+
+# Query historical data via API
+curl "http://localhost:8080/api/history/processes/1234?\
+  start=2024-01-01T00:00:00Z&end=2024-01-02T00:00:00Z"
+
+# Returns time-series data for process 1234
+\end{lstlisting}
+
+\section{Troubleshooting}
+\label{sec:troubleshooting}
+
+\subsection{Permission Denied Errors}
+
+\textbf{Symptom}: Cannot kill processes owned by other users.
+
+\textbf{Solution}: Run with sudo for system-wide control, or restrict operations to user-owned processes:
+
+\begin{lstlisting}[language=bash]
+# Run as root (use with caution)
+sudo process-manager
+
+# Or filter to current user
+process-manager --user $USER
+\end{lstlisting}
+
+\subsection{High CPU Usage}
+
+\textbf{Symptom}: Process manager itself consuming significant CPU.
+
+\textbf{Solution}: Increase refresh interval:
+
+\begin{lstlisting}[language=bash]
+# Reduce refresh frequency to 5 seconds
+process-manager --refresh 5
+\end{lstlisting}
+
+\subsection{GPU Monitoring Not Working}
+
+\textbf{Symptom}: GPU information not displayed.
+
+\textbf{Solution}: Verify GPU tools installed:
+
+\begin{lstlisting}[language=bash]
+# NVIDIA
+which nvidia-smi
+nvidia-smi --version
+
+# AMD
+which rocm-smi
+
+# Intel
+which intel_gpu_top
+\end{lstlisting}
+
+\subsection{API Server Connection Refused}
+
+\textbf{Symptom}: Cannot connect to API server.
+
+\textbf{Solution}: Check firewall rules and server binding:
+
+\begin{lstlisting}[language=bash]
+# Verify server running
+netstat -tuln | grep 8080
+
+# Allow firewall access
+sudo ufw allow 8080/tcp
+
+# Test local connection
+curl http://localhost:8080/api/system
+\end{lstlisting}
+
+\section{Summary}
+
+This chapter provided comprehensive usage documentation covering:
+
+\begin{itemize}
+    \item Build and installation procedures with system requirements
+    \item Interactive TUI mode with complete keyboard reference
+    \item REST API server mode with endpoint documentation
+    \item Metrics export for Prometheus and InfluxDB integration
+    \item Common workflows for process management tasks
+    \item Troubleshooting guidance for frequent issues
+\end{itemize}
+
+The three operational modes (TUI, API, export) provide flexibility for interactive use, programmatic integration, and monitoring system integration respectively. Screenshots in Appendix~\ref{app:screenshots} illustrate additional features and UI elements.

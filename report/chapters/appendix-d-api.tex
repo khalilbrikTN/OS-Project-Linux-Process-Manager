@@ -1,0 +1,776 @@
+\chapter{REST API Reference}
+\label{app:api}
+
+This appendix provides comprehensive documentation for the Linux Process Manager REST API, including endpoint specifications, request/response schemas, authentication, error handling, and example usage patterns.
+
+\section{API Overview}
+\label{sec:api-overview}
+
+\subsection{Base Configuration}
+
+\begin{table}[h]
+\centering
+\caption{API Server Configuration}
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Value} \\ \hline
+Protocol & HTTP/1.1 \\ \hline
+Default Port & 8080 \\ \hline
+Bind Address & 0.0.0.0 (all interfaces) \\ \hline
+Content Type & application/json \\ \hline
+Character Encoding & UTF-8 \\ \hline
+CORS & Enabled (permissive) \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Starting the API Server}
+
+\begin{lstlisting}[language=bash, caption={API Server Startup Commands}]
+# Default configuration (port 8080)
+./process-manager --api
+
+# Custom port
+./process-manager --api --api-port 3000
+
+# With authentication
+./process-manager --api --config config.toml
+
+# Background mode
+./process-manager --api --api-port 8080 &
+\end{lstlisting}
+
+\subsection{Authentication}
+
+\subsubsection{Optional Token-Based Authentication}
+
+When configured, the API requires a Bearer token in the Authorization header.
+
+\begin{lstlisting}[language=bash, caption={Authenticated Request Example}]
+curl -H "Authorization: Bearer YOUR_API_TOKEN" \
+     http://localhost:8080/api/processes
+\end{lstlisting}
+
+\textbf{Configuration} (in \texttt{config.toml}):
+\begin{lstlisting}[caption={API Authentication Configuration}]
+[api]
+enabled = true
+port = 8080
+auth_token = "your-secret-token-here"
+\end{lstlisting}
+
+\subsection{Response Format}
+
+All API responses follow a consistent JSON structure:
+
+\textbf{Success Response}:
+\begin{lstlisting}[language=json, caption={Success Response Format}]
+{
+  "status": "success",
+  "data": { ... },
+  "timestamp": "2024-11-30T12:00:00Z"
+}
+\end{lstlisting}
+
+\textbf{Error Response}:
+\begin{lstlisting}[language=json, caption={Error Response Format}]
+{
+  "status": "error",
+  "error": "Error message description",
+  "code": "ERROR_CODE",
+  "timestamp": "2024-11-30T12:00:00Z"
+}
+\end{lstlisting}
+
+\section{Process Endpoints}
+\label{sec:process-endpoints}
+
+\subsection{GET /api/processes}
+
+Retrieve list of all processes with optional filtering.
+
+\subsubsection{Request}
+
+\textbf{Method}: GET
+
+\textbf{URL}: \texttt{/api/processes}
+
+\textbf{Query Parameters}:
+
+\begin{table}[h]
+\centering
+\caption{GET /api/processes Query Parameters}
+\begin{tabular}{|l|l|l|p{5cm}|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Required} & \textbf{Description} \\ \hline
+user & string & No & Filter by username (exact match) \\ \hline
+min\_cpu & float & No & Minimum CPU usage percentage (0-100) \\ \hline
+min\_memory & float & No & Minimum memory usage percentage (0-100) \\ \hline
+container\_only & boolean & No & Show only containerized processes \\ \hline
+sort & string & No & Sort column (pid|name|cpu|memory) \\ \hline
+order & string & No & Sort order (asc|desc), default: desc \\ \hline
+limit & integer & No & Maximum number of results (1-1000) \\ \hline
+offset & integer & No & Pagination offset \\ \hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Response}
+
+\textbf{Status Code}: 200 OK
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={GET /api/processes Response}]
+{
+  "count": 245,
+  "total": 245,
+  "offset": 0,
+  "limit": 1000,
+  "processes": [
+    {
+      "pid": 1234,
+      "ppid": 1,
+      "name": "firefox",
+      "command": "/usr/bin/firefox --profile /home/user/.mozilla",
+      "user": "john",
+      "uid": 1000,
+      "gid": 1000,
+      "cpu_usage": 45.2,
+      "memory_usage": 1263820,
+      "memory_percent": 12.3,
+      "status": "Running",
+      "start_time": 1701345600,
+      "running_time": 3600,
+      "threads": 89,
+      "priority": 20,
+      "nice": 0,
+      "network_connections": 42,
+      "is_container": false,
+      "container_id": null,
+      "cgroup_memory_limit": null,
+      "gpu_memory": 512
+    },
+    ...
+  ]
+}
+\end{lstlisting}
+
+\subsubsection{Example Requests}
+
+\begin{lstlisting}[language=bash, caption={Process List Examples}]
+# Get all processes
+curl http://localhost:8080/api/processes
+
+# Filter by user
+curl http://localhost:8080/api/processes?user=john
+
+# High CPU processes (>50%)
+curl http://localhost:8080/api/processes?min_cpu=50
+
+# Combined filters
+curl "http://localhost:8080/api/processes?user=john&min_cpu=10&sort=cpu&order=desc"
+
+# Pagination
+curl "http://localhost:8080/api/processes?limit=50&offset=100"
+
+# Container processes only
+curl http://localhost:8080/api/processes?container_only=true
+\end{lstlisting}
+
+\subsection{GET /api/processes/:pid}
+
+Retrieve detailed information for specific process.
+
+\subsubsection{Request}
+
+\textbf{Method}: GET
+
+\textbf{URL}: \texttt{/api/processes/\{pid\}}
+
+\textbf{Path Parameters}:
+\begin{itemize}
+    \item \texttt{pid} (integer, required): Process ID
+\end{itemize}
+
+\subsubsection{Response}
+
+\textbf{Status Codes}:
+\begin{itemize}
+    \item 200 OK: Process found
+    \item 404 Not Found: Process does not exist
+\end{itemize}
+
+\textbf{Response Body} (200 OK):
+\begin{lstlisting}[language=json, caption={GET /api/processes/:pid Response}]
+{
+  "pid": 1234,
+  "ppid": 1,
+  "name": "firefox",
+  "command": "/usr/bin/firefox --profile /home/user/.mozilla",
+  "user": "john",
+  "uid": 1000,
+  "gid": 1000,
+  "cpu_usage": 45.2,
+  "memory_usage": 1263820,
+  "memory_percent": 12.3,
+  "status": "Running",
+  "start_time": 1701345600,
+  "running_time": 3600,
+  "threads": 89,
+  "priority": 20,
+  "nice": 0,
+  "network_connections": 42,
+  "is_container": false,
+  "container_id": null,
+  "cgroup_memory_limit": null,
+  "gpu_memory": 512
+}
+\end{lstlisting}
+
+\subsubsection{Example Requests}
+
+\begin{lstlisting}[language=bash, caption={Single Process Query}]
+# Get process by PID
+curl http://localhost:8080/api/processes/1234
+
+# With jq for formatted output
+curl http://localhost:8080/api/processes/1234 | jq .
+
+# Extract specific field
+curl -s http://localhost:8080/api/processes/1234 | \
+    jq '.cpu_usage'
+\end{lstlisting}
+
+\subsection{DELETE /api/processes/:pid}
+
+Send signal to process (kill, suspend, continue, etc.).
+
+\subsubsection{Request}
+
+\textbf{Method}: DELETE
+
+\textbf{URL}: \texttt{/api/processes/\{pid\}}
+
+\textbf{Path Parameters}:
+\begin{itemize}
+    \item \texttt{pid} (integer, required): Process ID
+\end{itemize}
+
+\textbf{Query Parameters}:
+
+\begin{table}[h]
+\centering
+\caption{DELETE /api/processes/:pid Parameters}
+\begin{tabular}{|l|l|l|p{6cm}|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Default} & \textbf{Description} \\ \hline
+signal & integer & 15 & Signal number (1-31) \\ \hline
+\end{tabular}
+\end{table}
+
+\textbf{Common Signals}:
+\begin{itemize}
+    \item 1 (SIGHUP): Hangup
+    \item 2 (SIGINT): Interrupt
+    \item 9 (SIGKILL): Kill (uncatchable)
+    \item 15 (SIGTERM): Terminate (default)
+    \item 18 (SIGCONT): Continue
+    \item 19 (SIGSTOP): Stop
+\end{itemize}
+
+\subsubsection{Response}
+
+\textbf{Status Codes}:
+\begin{itemize}
+    \item 200 OK: Signal sent successfully
+    \item 403 Forbidden: Permission denied
+    \item 404 Not Found: Process does not exist
+    \item 400 Bad Request: Invalid signal number
+\end{itemize}
+
+\textbf{Response Body} (200 OK):
+\begin{lstlisting}[language=json, caption={DELETE Response}]
+{
+  "message": "Signal 15 sent to process 1234",
+  "pid": 1234,
+  "signal": 15
+}
+\end{lstlisting}
+
+\textbf{Error Response} (403 Forbidden):
+\begin{lstlisting}[language=json, caption={Permission Denied Error}]
+{
+  "error": "Permission denied: cannot control process owned by another user",
+  "pid": 1234,
+  "process_user": "root",
+  "current_user": "john"
+}
+\end{lstlisting}
+
+\subsubsection{Example Requests}
+
+\begin{lstlisting}[language=bash, caption={Kill Process Examples}]
+# Send SIGTERM (graceful termination)
+curl -X DELETE http://localhost:8080/api/processes/1234
+
+# Send SIGKILL (force kill)
+curl -X DELETE http://localhost:8080/api/processes/1234?signal=9
+
+# Suspend process
+curl -X DELETE http://localhost:8080/api/processes/1234?signal=19
+
+# Continue suspended process
+curl -X DELETE http://localhost:8080/api/processes/1234?signal=18
+\end{lstlisting}
+
+\section{System Information Endpoints}
+\label{sec:system-endpoints}
+
+\subsection{GET /api/system}
+
+Retrieve system-wide information and statistics.
+
+\subsubsection{Response}
+
+\textbf{Status Code}: 200 OK
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={GET /api/system Response}]
+{
+  "cpu": {
+    "count": 8,
+    "architecture": "x86_64",
+    "load_average": {
+      "one_minute": 1.2,
+      "five_minutes": 1.5,
+      "fifteen_minutes": 1.8
+    }
+  },
+  "memory": {
+    "total_bytes": 17179869184,
+    "used_bytes": 7766016614,
+    "available_bytes": 9413852570,
+    "percent": 45.2,
+    "total_swap": 25769803776,
+    "used_swap": 536870912,
+    "swap_percent": 2.1
+  },
+  "uptime_seconds": 432000,
+  "hostname": "server1",
+  "kernel_version": "5.15.0-91-generic",
+  "os_version": "Ubuntu 22.04.3 LTS",
+  "process_count": 245,
+  "thread_count": 1823
+}
+\end{lstlisting}
+
+\subsection{GET /api/gpu}
+
+Retrieve GPU information and per-process GPU usage.
+
+\subsubsection{Response}
+
+\textbf{Status Codes}:
+\begin{itemize}
+    \item 200 OK: GPU information available
+    \item 503 Service Unavailable: No GPU detected
+\end{itemize}
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={GET /api/gpu Response}]
+{
+  "gpu_count": 1,
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 3080",
+      "memory_total": 10240,
+      "memory_used": 2048,
+      "memory_percent": 20.0,
+      "temperature": 65,
+      "utilization": 45.0,
+      "driver_version": "470.86",
+      "processes": [
+        {
+          "pid": 1234,
+          "name": "python3",
+          "gpu_memory": 1024
+        },
+        {
+          "pid": 5678,
+          "name": "blender",
+          "gpu_memory": 1024
+        }
+      ]
+    }
+  ]
+}
+\end{lstlisting}
+
+\section{Container Endpoints}
+\label{sec:container-endpoints}
+
+\subsection{GET /api/containers}
+
+List all detected containers with their processes.
+
+\subsubsection{Response}
+
+\textbf{Status Code}: 200 OK
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={GET /api/containers Response}]
+{
+  "count": 5,
+  "containers": [
+    {
+      "id": "a1b2c3d4e5f6...",
+      "short_id": "a1b2c3d4e5f6",
+      "name": "nginx-proxy",
+      "runtime": "docker",
+      "status": "running",
+      "image": "nginx:latest",
+      "created": 1701345600,
+      "process_count": 3,
+      "pids": [1234, 1235, 1236],
+      "cpu_usage": 5.2,
+      "memory_usage": 52428800,
+      "memory_limit": 536870912,
+      "network_rx": 1048576,
+      "network_tx": 2097152
+    },
+    ...
+  ]
+}
+\end{lstlisting}
+
+\subsection{GET /api/containers/:id}
+
+Get detailed information for specific container.
+
+\subsubsection{Request}
+
+\textbf{Path Parameters}:
+\begin{itemize}
+    \item \texttt{id} (string): Container ID (full or short hash)
+\end{itemize}
+
+\subsubsection{Response}
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={Container Details Response}]
+{
+  "id": "a1b2c3d4e5f6...",
+  "name": "nginx-proxy",
+  "runtime": "docker",
+  "status": "running",
+  "image": "nginx:latest",
+  "processes": [
+    {
+      "pid": 1234,
+      "name": "nginx",
+      "cpu_usage": 3.2,
+      "memory_usage": 20971520
+    },
+    ...
+  ],
+  "cgroup_path": "/docker/a1b2c3d4e5f6...",
+  "network_mode": "bridge",
+  "ip_addresses": ["172.17.0.2"]
+}
+\end{lstlisting}
+
+\section{Historical Data Endpoints}
+\label{sec:history-endpoints}
+
+\subsection{GET /api/history/processes/:pid}
+
+Retrieve historical data for specific process.
+
+\subsubsection{Request}
+
+\textbf{Query Parameters}:
+
+\begin{table}[h]
+\centering
+\caption{Historical Query Parameters}
+\begin{tabular}{|l|l|l|p{5cm}|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Required} & \textbf{Description} \\ \hline
+start & ISO 8601 & Yes & Start timestamp \\ \hline
+end & ISO 8601 & Yes & End timestamp \\ \hline
+interval & integer & No & Aggregation interval (seconds) \\ \hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Response}
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={Process History Response}]
+{
+  "pid": 1234,
+  "start": "2024-11-30T00:00:00Z",
+  "end": "2024-11-30T01:00:00Z",
+  "interval": 60,
+  "data_points": 60,
+  "snapshots": [
+    {
+      "timestamp": "2024-11-30T00:00:00Z",
+      "cpu_usage": 45.2,
+      "memory_usage": 1263820,
+      "threads": 89
+    },
+    {
+      "timestamp": "2024-11-30T00:01:00Z",
+      "cpu_usage": 43.8,
+      "memory_usage": 1265432,
+      "threads": 89
+    },
+    ...
+  ]
+}
+\end{lstlisting}
+
+\subsubsection{Example Requests}
+
+\begin{lstlisting}[language=bash, caption={Historical Data Query Examples}]
+# Last hour
+curl "http://localhost:8080/api/history/processes/1234?\
+start=2024-11-30T11:00:00Z&end=2024-11-30T12:00:00Z"
+
+# Last 24 hours with 5-minute intervals
+curl "http://localhost:8080/api/history/processes/1234?\
+start=2024-11-29T12:00:00Z&end=2024-11-30T12:00:00Z&\
+interval=300"
+\end{lstlisting}
+
+\subsection{GET /api/history/system}
+
+Retrieve system-wide historical metrics.
+
+\subsubsection{Response}
+
+\textbf{Response Body}:
+\begin{lstlisting}[language=json, caption={System History Response}]
+{
+  "start": "2024-11-30T00:00:00Z",
+  "end": "2024-11-30T01:00:00Z",
+  "snapshots": [
+    {
+      "timestamp": "2024-11-30T00:00:00Z",
+      "cpu_count": 8,
+      "total_memory": 17179869184,
+      "used_memory": 7766016614,
+      "load_avg_1": 1.2,
+      "load_avg_5": 1.5,
+      "load_avg_15": 1.8,
+      "process_count": 245
+    },
+    ...
+  ]
+}
+\end{lstlisting}
+
+\section{Metrics Endpoint}
+\label{sec:metrics-endpoint}
+
+\subsection{GET /api/metrics}
+
+Export metrics in Prometheus text format.
+
+\subsubsection{Response}
+
+\textbf{Status Code}: 200 OK
+
+\textbf{Content-Type}: text/plain; version=0.0.4
+
+\textbf{Response Body}:
+\begin{lstlisting}[caption={Prometheus Metrics}]
+# HELP process_cpu_usage Process CPU usage percentage
+# TYPE process_cpu_usage gauge
+process_cpu_usage{pid="1234",name="firefox",user="john"} 45.2
+
+# HELP process_memory_bytes Process memory usage in bytes
+# TYPE process_memory_bytes gauge
+process_memory_bytes{pid="1234",name="firefox"} 1263820800
+
+# HELP system_cpu_count Number of CPU cores
+# TYPE system_cpu_count gauge
+system_cpu_count 8
+
+# HELP system_load_average System load average
+# TYPE system_load_average gauge
+system_load_average{period="1m"} 1.2
+\end{lstlisting}
+
+\section{Error Codes}
+\label{sec:error-codes}
+
+\begin{table}[h]
+\centering
+\caption{API Error Codes}
+\begin{tabular}{|l|l|p{7cm}|}
+\hline
+\textbf{HTTP Status} & \textbf{Error Code} & \textbf{Description} \\ \hline
+400 & INVALID\_PARAMETER & Invalid query parameter or request body \\ \hline
+401 & UNAUTHORIZED & Missing or invalid authentication token \\ \hline
+403 & PERMISSION\_DENIED & Insufficient permissions for operation \\ \hline
+404 & NOT\_FOUND & Process or resource not found \\ \hline
+429 & RATE\_LIMIT\_EXCEEDED & Too many requests (rate limiting) \\ \hline
+500 & INTERNAL\_ERROR & Internal server error \\ \hline
+503 & SERVICE\_UNAVAILABLE & Service temporarily unavailable (e.g., GPU) \\ \hline
+\end{tabular}
+\end{table}
+
+\section{Rate Limiting}
+\label{sec:rate-limiting}
+
+\subsection{Default Limits}
+
+\begin{table}[h]
+\centering
+\caption{API Rate Limits}
+\begin{tabular}{|l|r|}
+\hline
+\textbf{Limit Type} & \textbf{Value} \\ \hline
+Requests per second (per IP) & 10 \\ \hline
+Burst size & 20 \\ \hline
+Concurrent connections & 100 \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Rate Limit Headers}
+
+Responses include rate limit information in headers:
+
+\begin{lstlisting}[caption={Rate Limit Headers}]
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 7
+X-RateLimit-Reset: 1701345661
+\end{lstlisting}
+
+\section{Client Examples}
+\label{sec:client-examples}
+
+\subsection{Python Client}
+
+\begin{lstlisting}[language=Python, caption={Python API Client Example}]
+import requests
+from typing import List, Dict
+
+class ProcessManagerClient:
+    def __init__(self, base_url: str, token: str = None):
+        self.base_url = base_url
+        self.headers = {}
+        if token:
+            self.headers['Authorization'] = f'Bearer {token}'
+
+    def get_processes(self, **filters) -> List[Dict]:
+        """Get process list with optional filters."""
+        response = requests.get(
+            f'{self.base_url}/api/processes',
+            params=filters,
+            headers=self.headers
+        )
+        response.raise_for_status()
+        return response.json()['processes']
+
+    def get_process(self, pid: int) -> Dict:
+        """Get specific process by PID."""
+        response = requests.get(
+            f'{self.base_url}/api/processes/{pid}',
+            headers=self.headers
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def kill_process(self, pid: int, signal: int = 15):
+        """Send signal to process."""
+        response = requests.delete(
+            f'{self.base_url}/api/processes/{pid}',
+            params={'signal': signal},
+            headers=self.headers
+        )
+        response.raise_for_status()
+        return response.json()
+
+# Usage
+client = ProcessManagerClient('http://localhost:8080')
+
+# Get all processes
+processes = client.get_processes()
+
+# Filter high CPU processes
+high_cpu = client.get_processes(min_cpu=50)
+
+# Kill process
+client.kill_process(1234, signal=15)
+\end{lstlisting}
+
+\subsection{JavaScript Client}
+
+\begin{lstlisting}[language=JavaScript, caption={JavaScript API Client}]
+class ProcessManagerClient {
+  constructor(baseUrl, token = null) {
+    this.baseUrl = baseUrl;
+    this.headers = {
+      'Content-Type': 'application/json'
+    };
+    if (token) {
+      this.headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  async getProcesses(filters = {}) {
+    const params = new URLSearchParams(filters);
+    const response = await fetch(
+      `${this.baseUrl}/api/processes?${params}`,
+      { headers: this.headers }
+    );
+    if (!response.ok) throw new Error('API request failed');
+    const data = await response.json();
+    return data.processes;
+  }
+
+  async getProcess(pid) {
+    const response = await fetch(
+      `${this.baseUrl}/api/processes/${pid}`,
+      { headers: this.headers }
+    );
+    if (!response.ok) throw new Error('Process not found');
+    return await response.json();
+  }
+
+  async killProcess(pid, signal = 15) {
+    const response = await fetch(
+      `${this.baseUrl}/api/processes/${pid}?signal=${signal}`,
+      {
+        method: 'DELETE',
+        headers: this.headers
+      }
+    );
+    if (!response.ok) throw new Error('Kill failed');
+    return await response.json();
+  }
+}
+
+// Usage
+const client = new ProcessManagerClient('http://localhost:8080');
+
+client.getProcesses({ min_cpu: 50 })
+  .then(processes => console.log(processes))
+  .catch(error => console.error(error));
+\end{lstlisting}
+
+\section{Summary}
+
+This appendix documented the complete REST API specification including:
+
+\begin{itemize}
+    \item \textbf{9 endpoints}: Processes, system, GPU, containers, history, metrics
+    \item \textbf{Authentication}: Optional Bearer token authentication
+    \item \textbf{Filtering}: Query parameters for process filtering
+    \item \textbf{Error handling}: Comprehensive error codes and messages
+    \item \textbf{Rate limiting}: Protection against abuse
+    \item \textbf{Client examples}: Python and JavaScript reference implementations
+\end{itemize}
+
+For interactive API exploration, use the built-in web UI at \texttt{http://localhost:8080} when the API server is running.
